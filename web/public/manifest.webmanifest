@@ -1,0 +1,9 @@
+{
+  "name": "Pharmacy Dispensing",
+  "short_name": "Pharmacy",
+  "start_url": "/#dispense",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#f4f6f9",
+  "theme_color": "#1d2330"
+}

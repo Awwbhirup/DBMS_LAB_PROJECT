@@ -14,6 +14,17 @@ const TABS = [
   ["lab", "Under the hood"]
 ];
 
+function toggleFullscreen() {
+  const d = document;
+  const el = d.documentElement;
+  if (d.fullscreenElement || d.webkitFullscreenElement) {
+    (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+  } else {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) req.call(el).then?.(() => screen.orientation?.lock?.("landscape").catch(() => {}));
+  }
+}
+
 function Dot({ state, label }) {
   return (
     <span className={"health " + (state === "ok" ? "up" : "down")} title={label + ": " + state}>
@@ -87,6 +98,7 @@ export default function App() {
               ))}
             </select>
           </label>
+          <button className="sep fs" onClick={toggleFullscreen}>Fullscreen</button>
         </div>
       </header>
       <main>
