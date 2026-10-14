@@ -1,0 +1,38 @@
+1. The pitch (30 sec)
+"We're building a Pharmacy Inventory & Prescription Management system. One dispensing action touches three databases, each doing a job the others aren't good at: PostgreSQL handles the transaction and picks the right batch, MongoDB checks if the drug combination is safe, and Cassandra logs the event for audit/analytics. No single database could do all three well — that's the actual point of the design."
+2. The three databases — say this fast, don't fumble the names
+PostgreSQL — transactional core (medicines, batches, prescriptions). Needs strong consistency since it's money/stock-adjacent.
+MongoDB — safety knowledge layer (drug interactions, guidelines). Flexible schema, read-heavy.
+Cassandra — event log (every dispense, stock adjustment, batch receipt). Append-only, high write volume, distributed.
+One-liner: "Three workloads, three engines, each chosen on purpose — that's polyglot persistence."
+3. The flow, step by step (say this in order, it shows you understand the pipeline)
+Pharmacist searches a medicine against a prescription
+Postgres locks the batch row, picks the one nearest expiry (FEFO)
+Backend queries MongoDB for interactions across all medicines on the prescription
+Conflict found → warning shown before pharmacist proceeds
+On confirm → Postgres commits, stock updates
+Cassandra gets a write for the event — independent of the transaction above
+4. Concepts per database — this is what he's actually grading
+PostgreSQL:
+ACID transactions — whole dispense is one transaction, rolls back if any step fails
+Row-level locking — SELECT ... FOR UPDATE so two pharmacists can't both grab the last unit
+Indexing — B-tree index on expiry_date makes FEFO query fast
+Referential integrity — FKs mean you can't insert a batch for a medicine that doesn't exist
+MongoDB:
+Schema flexibility — interaction records don't all have the same fields, no migrations needed
+Document model — one interaction = one document, no joins needed
+Compound index on drug_a/drug_b — keeps the interaction check fast since it runs on every dispense
+Cassandra:
+Wide-column model — rows identified by partition key + clustering key, not a single PK
+Partition key = medicine_id, clustering key = event_timestamp — fast "history for this medicine" reads
+Tunable consistency — event log can trade consistency for write speed since it's not the source of truth for stock
+CAP theorem in practice — Postgres leans consistency, Cassandra leans availability/partition tolerance
+5. Have these answers ready cold (his likely questions)
+Why not one database for everything? → Each data type behaves differently — transactions need locks, interactions need flexible schema, logs need to absorb huge write volume. One engine compromises at least two of those.
+Why not just store interactions as JSON in Postgres? → Postgres can store JSON, but Mongo gives better read-optimized indexing and horizontal scale for a collection queried on almost every dispense — and keeps its lifecycle independent of the transactional DB.
+Two pharmacists, same batch, same time? → SELECT ... FOR UPDATE locks the row; second transaction waits till the first commits/rolls back. Stock never double-counts or goes negative.
+MongoDB is down mid-dispense? → Block the dispense, don't skip the safety check silently. State this as a deliberate design decision.
+Isn't three databases overkill for a student project? → It's intentionally more than the minimum — the goal is demonstrating concepts, not the smallest working system. Each database earns its place with a specific reason.
+What's a partition key? → Decides which node stores a row. Partitioning by medicine_id keeps one medicine's whole history on one node, so queries don't scan the cluster.
+6. If he asks about frontend
+Say it's intentionally thin this review — one dispensing screen (search → batch/expiry → warning → confirm), built later in React once backend logic is stable. Could even start as Postman-tested API calls before any UI, since the database layer is what's being graded.

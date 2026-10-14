@@ -1,0 +1,22 @@
+{
+  "name": "pharmacy-polyglot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["web"],
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "server": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "web": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "smoke": "node scripts/smoke.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongodb": "^6.12.0",
+    "pg": "^8.13.1"
+  }
+}
