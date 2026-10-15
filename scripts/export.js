@@ -32,8 +32,12 @@ const cell = (v) => {
 for (const [name, sql] of Object.entries(queries)) {
   const r = await client.query(sql);
   const lines = [r.fields.map((f) => f.name).join(",")].concat(r.rows.map((row) => r.fields.map((f) => cell(row[f.name])).join(",")));
-  fs.writeFileSync(path.join(out, name + ".csv"), lines.join("\r\n") + "\r\n");
-  console.log(name, r.rowCount);
+  try {
+    fs.writeFileSync(path.join(out, name + ".csv"), lines.join("\r\n") + "\r\n");
+    console.log(name, r.rowCount);
+  } catch (e) {
+    console.log(name, "skipped: file is open in another program, close it and run again");
+  }
 }
 await client.end();
 
