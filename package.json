@@ -10,7 +10,8 @@
     "start": "node server/index.js",
     "web": "npm run dev --workspace web",
     "build": "npm run build --workspace web",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "export": "node scripts/export.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
