@@ -1,3 +1,6 @@
+// Top-level layout: the header (database status, user, fullscreen) and the
+// five tabs. The tab is kept in the URL hash, e.g. /#inventory.
+
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 import Dispense from "./Dispense.jsx";
@@ -14,6 +17,7 @@ const TABS = [
   ["lab", "Under the hood"]
 ];
 
+// fullscreen for phones and projectors; Safari on iPhone does not support it
 function toggleFullscreen() {
   const d = document;
   const el = d.documentElement;
@@ -25,6 +29,7 @@ function toggleFullscreen() {
   }
 }
 
+// green or red status light for one database
 function Dot({ state, label }) {
   return (
     <span className={"health " + (state === "ok" ? "up" : "down")} title={label + ": " + state}>

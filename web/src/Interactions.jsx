@@ -1,3 +1,7 @@
+// Interactions screen: every MongoDB document, and a box to insert a new one.
+// Extra fields are accepted; the collection validator rejects a document
+// without drug_a, drug_b or a valid severity.
+
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 

@@ -1,12 +1,16 @@
+// Database connections. Settings come from .env (see .env.example).
+
 import "dotenv/config";
 import pg from "pg";
 import { MongoClient } from "mongodb";
 
 const env = process.env;
 
+// return DATE columns as plain "YYYY-MM-DD" strings and BIGINT as numbers
 pg.types.setTypeParser(1082, (v) => v);
 pg.types.setTypeParser(20, (v) => Number(v));
 
+// the API's own role: SELECT, INSERT and a limited UPDATE, nothing else
 export const pool = new pg.Pool({
   host: env.PGHOST,
   port: Number(env.PGPORT),
@@ -16,6 +20,7 @@ export const pool = new pg.Pool({
   max: 12
 });
 
+// the role that owns the tables; only used by the audit-log tamper demo
 export const ownerPool = new pg.Pool({
   host: env.PGHOST,
   port: Number(env.PGPORT),
@@ -25,8 +30,12 @@ export const ownerPool = new pg.Pool({
   max: 2
 });
 
+// a reset (DROP DATABASE ... WITH FORCE) kills idle connections; without this
+// handler node-postgres would crash the server
 for (const p of [pool, ownerPool]) p.on("error", () => {});
 
+// Simulated outage: a closed port, so every MongoDB call times out exactly
+// as it would if the server were really down.
 const DEAD_URL = "mongodb://127.0.0.1:1";
 let mongo = null;
 let outage = false;
@@ -43,6 +52,7 @@ export async function setMongoOutage(on) {
   }
 }
 
+// 1.5 s timeout: a dispense waits at most this long for the safety check
 export async function interactionsCollection() {
   if (!mongo) {
     mongo = new MongoClient(outage ? DEAD_URL : env.MONGO_URL, {
@@ -66,6 +76,9 @@ export class SafetyUnavailable extends Error {
   }
 }
 
+// Checks every pair of generic names on a prescription in one query.
+// Names are sorted so each pair is asked for in the same order it is stored
+// (drug_a < drug_b), which lets the unique pair index answer it.
 export async function findInteractions(genericNames) {
   const names = [...new Set(genericNames)].sort((a, b) => a.localeCompare(b));
   const pairs = [];

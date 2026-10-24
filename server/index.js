@@ -1,3 +1,8 @@
+// Express API for the pharmacy system. Every route lives in this file; the
+// dispense transaction itself is in dispense.js and the database connections
+// are in db.js. The built React app (web/dist) is served from here as well,
+// so the whole system runs on one port.
+
 import express from "express";
 import cors from "cors";
 import fs from "node:fs";
@@ -5,13 +10,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pool, ownerPool, interactionsCollection, mongoOutage, setMongoOutage } from "./db.js";
 import { preview, confirm, DispenseError } from "./dispense.js";
+import { writeSnapshot, scheduleSnapshot } from "./snapshot.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// lets async route handlers pass their errors to the error handler at the bottom
 const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
 const int = (v) => (v === undefined || v === null || v === "" ? null : Number.parseInt(v, 10));
+
+// refresh the readable copy in data/ after anything is written
+const dataChanged = () => scheduleSnapshot(pool, interactionsCollection);
+
+// ---------- status and lookups ----------
 
 app.get("/api/health", wrap(async (req, res) => {
   const out = { postgres: "down", mongo: "down", mongo_outage_simulated: mongoOutage() };
@@ -36,6 +48,7 @@ app.get("/api/users", wrap(async (req, res) => {
   res.json((await pool.query("SELECT * FROM users ORDER BY user_id")).rows);
 }));
 
+// search by brand or generic name, prefix match first
 app.get("/api/medicines", wrap(async (req, res) => {
   const q = String(req.query.q || "").trim().toLowerCase();
   const r = await pool.query(
@@ -48,6 +61,8 @@ app.get("/api/medicines", wrap(async (req, res) => {
   );
   res.json(r.rows);
 }));
+
+// ---------- prescriptions ----------
 
 app.get("/api/prescriptions", wrap(async (req, res) => {
   const r = await pool.query(
@@ -62,6 +77,7 @@ app.get("/api/prescriptions", wrap(async (req, res) => {
   res.json(r.rows);
 }));
 
+// one prescription with each line's prescribed, dispensed and in-stock quantity
 app.get("/api/prescriptions/:id", wrap(async (req, res) => {
   const p = await pool.query("SELECT * FROM prescriptions WHERE prescription_id = $1", [int(req.params.id)]);
   if (!p.rowCount) return res.status(404).json({ error: "Prescription not found" });
@@ -79,6 +95,8 @@ app.get("/api/prescriptions/:id", wrap(async (req, res) => {
   res.json({ ...p.rows[0], items: items.rows });
 }));
 
+// header and all lines go in one transaction: a bad line (blank name, unknown
+// medicine) rolls the whole prescription back
 app.post("/api/prescriptions", wrap(async (req, res) => {
   const b = req.body;
   const items = Array.isArray(b.items) ? b.items.filter((i) => int(i.medicine_id) && int(i.quantity)) : [];
@@ -99,6 +117,7 @@ app.post("/api/prescriptions", wrap(async (req, res) => {
       );
     }
     await client.query("COMMIT");
+    dataChanged();
     res.status(201).json({ ...p.rows[0], items: items.length });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -108,11 +127,16 @@ app.post("/api/prescriptions", wrap(async (req, res) => {
   }
 }));
 
+// ---------- dispensing ----------
+
+// phase 1: FEFO plan and interaction check, nothing locked or written
 app.post("/api/dispense/preview", wrap(async (req, res) => {
   const b = req.body;
   res.json(await preview({ prescription_id: int(b.prescription_id), medicine_id: int(b.medicine_id), quantity: int(b.quantity) || 1 }));
 }));
 
+// phase 2: the transaction. Every step is recorded with its time so the
+// screen can show what the database did, whether it committed or not.
 app.post("/api/dispense/confirm", wrap(async (req, res) => {
   const b = req.body;
   const steps = [];
@@ -129,12 +153,15 @@ app.post("/api/dispense/confirm", wrap(async (req, res) => {
       },
       { trace }
     );
+    dataChanged();
     res.json({ ...out, steps });
   } catch (e) {
     if (e instanceof DispenseError) e.extra = { ...e.extra, steps };
     throw e;
   }
 }));
+
+// ---------- inventory ----------
 
 app.get("/api/inventory", wrap(async (req, res) => {
   res.json((await pool.query("SELECT * FROM v_stock ORDER BY name")).rows);
@@ -144,6 +171,7 @@ app.get("/api/inventory/near-expiry", wrap(async (req, res) => {
   res.json((await pool.query("SELECT * FROM v_near_expiry")).rows);
 }));
 
+// live batches plus anything received in the last year, so expired lots still show
 app.get("/api/medicines/:id/batches", wrap(async (req, res) => {
   const r = await pool.query(
     `SELECT batch_id, batch_number, expiry_date, quantity, received_date,
@@ -155,6 +183,7 @@ app.get("/api/medicines/:id/batches", wrap(async (req, res) => {
   res.json(r.rows);
 }));
 
+// receiving stock: the batch and its RECEIPT row in the audit log commit together
 app.post("/api/batches", wrap(async (req, res) => {
   const b = req.body;
   const client = await pool.connect();
@@ -172,6 +201,7 @@ app.post("/api/batches", wrap(async (req, res) => {
       [batch.medicine_id, batch.batch_id, batch.quantity, int(b.user_id) || 4]
     );
     await client.query("COMMIT");
+    dataChanged();
     res.status(201).json(batch);
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -181,6 +211,9 @@ app.post("/api/batches", wrap(async (req, res) => {
   }
 }));
 
+// ---------- audit log and reports ----------
+
+// filtering by medicine uses idx_events_medicine_time
 app.get("/api/events", wrap(async (req, res) => {
   const medicine = int(req.query.medicine_id);
   const type = req.query.type ? String(req.query.type).toUpperCase() : null;
@@ -205,6 +238,8 @@ app.get("/api/reports/top-week", wrap(async (req, res) => {
   res.json((await pool.query("SELECT * FROM v_top_week LIMIT 10")).rows);
 }));
 
+// ---------- drug interactions (MongoDB) ----------
+
 app.get("/api/interactions", wrap(async (req, res) => {
   const col = await interactionsCollection();
   const drug = req.query.drug ? String(req.query.drug) : null;
@@ -213,6 +248,9 @@ app.get("/api/interactions", wrap(async (req, res) => {
   res.json(docs);
 }));
 
+// any extra fields are accepted; the collection validator only insists on
+// drug_a, drug_b and severity. The pair is stored in alphabetical order so
+// the unique index sees Warfarin/Aspirin and Aspirin/Warfarin as the same pair.
 app.post("/api/interactions", wrap(async (req, res) => {
   const doc = { ...req.body };
   delete doc._id;
@@ -226,6 +264,7 @@ app.post("/api/interactions", wrap(async (req, res) => {
   const col = await interactionsCollection();
   try {
     const r = await col.insertOne(doc);
+    dataChanged();
     res.status(201).json({ ...doc, _id: r.insertedId });
   } catch (e) {
     if (e.code === 121) return res.status(422).json({ error: "Rejected by the collection validator: drug_a, drug_b and a valid severity are required", detail: e.errInfo });
@@ -234,6 +273,11 @@ app.post("/api/interactions", wrap(async (req, res) => {
   }
 }));
 
+// ---------- "Under the hood" demonstrations ----------
+
+// Two pharmacists, one unit. The earliest Cetirizine batch is first set to 1
+// (logged as an ADJUSTMENT), then A locks it and holds the lock while B asks
+// for the same unit 250 ms later.
 app.post("/api/demo/race", wrap(async (req, res) => {
   const medicineId = int(req.body.medicine_id) || 42;
   const holdMs = Math.min(int(req.body.hold_ms) || 2000, 5000);
@@ -274,6 +318,7 @@ app.post("/api/demo/race", wrap(async (req, res) => {
         .catch((e) => ({ who, ok: false, error: e.message }))
     );
   const results = await Promise.all([run("A", 1, 0, holdMs), run("B", 2, 250, 0)]);
+  dataChanged();
   const after = await pool.query(
     `SELECT batch_number, expiry_date, quantity FROM batches
      WHERE medicine_id = $1 AND expiry_date > current_date AND (quantity > 0 OR batch_id = $2)
@@ -295,6 +340,8 @@ async function explain(client, medicineId) {
   return { plan: text, execution_ms: ms };
 }
 
+// The FEFO query twice: normally, then with index scans switched off for this
+// transaction only (SET LOCAL), so the second plan has to scan the whole table.
 app.get("/api/demo/explain", wrap(async (req, res) => {
   const medicineId = int(req.query.medicine_id) || 1;
   const client = await pool.connect();
@@ -315,6 +362,8 @@ app.get("/api/demo/explain", wrap(async (req, res) => {
   }
 }));
 
+// The same UPDATE on the audit log as both roles. pharmacy_app has no UPDATE
+// privilege; pharmacy_owner has it but is stopped by the trigger.
 app.post("/api/demo/tamper", wrap(async (req, res) => {
   const sql = "UPDATE dispensing_events SET quantity_changed = -1 WHERE event_id = (SELECT max(event_id) FROM dispensing_events)";
   const attempt = async (who, p) => {
@@ -328,10 +377,13 @@ app.post("/api/demo/tamper", wrap(async (req, res) => {
   res.json({ sql, attempts: [await attempt("pharmacy_app (the API's role)", pool), await attempt("pharmacy_owner (owns the table)", ownerPool)] });
 }));
 
+// simulated MongoDB outage: see setMongoOutage in db.js
 app.post("/api/demo/mongo", wrap(async (req, res) => {
   await setMongoOutage(Boolean(req.body.down));
   res.json({ mongo_outage_simulated: mongoOutage() });
 }));
+
+// ---------- front end and errors ----------
 
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web/dist");
 if (fs.existsSync(dist)) {
@@ -339,6 +391,8 @@ if (fs.existsSync(dist)) {
   app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(dist, "index.html")));
 }
 
+// PostgreSQL error codes turned into readable HTTP errors:
+// 23505 unique, 23514 check, 23503 foreign key, 23502 not null, 22007/22P02 bad input
 app.use((err, req, res, next) => {
   if (err instanceof DispenseError) return res.status(err.status).json({ error: err.message, code: err.code, ...err.extra });
   if (err.code === "23505") return res.status(409).json({ error: "Duplicate: " + err.detail });
@@ -350,4 +404,9 @@ app.use((err, req, res, next) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-app.listen(port, () => console.log(`pharmacy api on http://localhost:${port}`));
+app.listen(port, () => {
+  console.log(`pharmacy api on http://localhost:${port}`);
+  writeSnapshot(pool, interactionsCollection)
+    .then(() => console.log("readable copy of the data written to data/"))
+    .catch((e) => console.error("data snapshot failed:", e.message));
+});

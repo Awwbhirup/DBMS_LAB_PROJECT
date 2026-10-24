@@ -1,3 +1,8 @@
+// Dispense screen: pick a prescription line or search a medicine, see the
+// FEFO batch plan and interaction warnings (preview), then Confirm.
+// Confirm calls /api/dispense/confirm and shows every step of the
+// transaction, whether it committed or rolled back.
+
 import React, { useEffect, useRef, useState } from "react";
 import { api, fmtDate } from "./api.js";
 import NewPrescription from "./NewPrescription.jsx";
@@ -5,6 +10,7 @@ import NewPrescription from "./NewPrescription.jsx";
 const SEV_LABEL = { contraindicated: "Contraindicated", high: "High severity", moderate: "Moderate severity", low: "Low severity" };
 const SKIP = new Set(["_id", "drug_a", "drug_b", "severity", "effect", "recommendation", "source", "added_at", "involves_this"]);
 
+// fields a document has beyond the required ones (mechanism, monitoring, ...)
 function extraFields(doc) {
   return Object.entries(doc).filter(([k]) => !SKIP.has(k));
 }
@@ -16,6 +22,7 @@ function show(v) {
   return String(v);
 }
 
+// one interaction card; high and moderate ones need the acknowledge box ticked
 function Warning({ doc, acked, onAck, needsAck }) {
   return (
     <div className={"warn sev-" + doc.severity + (doc.involves_this ? "" : " other")}>
@@ -49,6 +56,7 @@ function Warning({ doc, acked, onAck, needsAck }) {
   );
 }
 
+// the transaction trace returned by the server, with times in ms
 function Steps({ steps }) {
   if (!steps?.length) return null;
   return (
@@ -119,6 +127,8 @@ export default function Dispense({ userId, userName }) {
     setOutcome({ kind: "cancel" });
   };
 
+    // the server re-checks everything inside the transaction; the screen
+    // rules are only there to save a round trip
   const confirm = async () => {
     setBusy(true);
     try {

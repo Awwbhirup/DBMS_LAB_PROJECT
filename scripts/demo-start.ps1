@@ -1,3 +1,7 @@
+# Used by START_DEMO.bat: makes sure both database services are running,
+# installs and builds if needed, starts the server on port 4000 and opens
+# the browser.
+
 $ErrorActionPreference = "Stop"
 $app = Split-Path -Parent $PSScriptRoot
 Set-Location $app

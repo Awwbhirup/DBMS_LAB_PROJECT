@@ -1,5 +1,10 @@
+// The dispense, in two phases:
+//   preview()  reads stock and checks interactions; locks nothing, writes nothing
+//   confirm()  one PostgreSQL transaction that locks, re-checks, updates and logs
+
 import { pool, findInteractions, SafetyUnavailable } from "./db.js";
 
+// an expected refusal (no stock, contraindicated, ...) with its HTTP status
 export class DispenseError extends Error {
   constructor(status, code, message, extra = {}) {
     super(message);
@@ -9,6 +14,10 @@ export class DispenseError extends Error {
   }
 }
 
+// First Expiry First Out: the earliest unexpired batch that still has stock,
+// locked until COMMIT. $2 lists batches already taken in this transaction, so
+// running it again gives the next batch when one is not enough.
+// Served by the partial index idx_batches_fefo.
 const FEFO_SQL = `SELECT batch_id, batch_number, expiry_date, quantity
 FROM batches
 WHERE medicine_id = $1 AND quantity > 0 AND expiry_date > current_date
@@ -17,6 +26,7 @@ ORDER BY expiry_date, batch_id
 LIMIT 1
 FOR UPDATE`;
 
+// which batches a quantity would come from; expired batches are never planned
 export function fefoPlan(batches, quantity) {
   const plan = [];
   let left = quantity;
@@ -30,6 +40,7 @@ export function fefoPlan(batches, quantity) {
   return { plan, short_by: Math.max(left, 0) };
 }
 
+// every line of the prescription with prescribed and already-dispensed amounts
 async function prescriptionContext(db, prescriptionId, medicineId) {
   const rx = await db.query(
     `SELECT pi.medicine_id, m.name, m.generic_name, p.quantity_prescribed, p.quantity_dispensed
@@ -46,6 +57,9 @@ async function prescriptionContext(db, prescriptionId, medicineId) {
   return { items: rx.rows, item };
 }
 
+// Sorts the warnings found and decides what they mean for this medicine:
+// contraindicated blocks it, high and moderate need acknowledgement, low is
+// shown for information only.
 function classify(found, generic) {
   const order = { contraindicated: 3, high: 2, moderate: 1, low: 0 };
   const list = found
@@ -56,6 +70,8 @@ function classify(found, generic) {
   return { list, blocking, needsAck };
 }
 
+// Phase 1. Plain reads through the pool, no transaction and no locks, so the
+// pharmacist can read a warning for as long as needed.
 export async function preview({ prescription_id, medicine_id, quantity }) {
   const med = await pool.query("SELECT * FROM medicines WHERE medicine_id = $1", [medicine_id]);
   if (!med.rowCount) throw new DispenseError(404, "no_medicine", "Medicine not found");
@@ -76,6 +92,7 @@ export async function preview({ prescription_id, medicine_id, quantity }) {
     rx = await prescriptionContext(pool, prescription_id, medicine_id);
     generics = rx.items.map((i) => i.generic_name);
   }
+  // in preview an outage is only reported; confirm() is where it blocks
   let safety;
   try {
     const r = await findInteractions(generics);
@@ -95,6 +112,11 @@ export async function preview({ prescription_id, medicine_id, quantity }) {
   };
 }
 
+// Phase 2. Locks are always taken in the same order, prescription line first
+// and then batches by expiry, so two confirms can never deadlock each other.
+// Any refusal below throws, and the catch block rolls everything back.
+// opts.trace records each step for the screen; opts.holdMs is only used by
+// the race demo to keep the lock held for a while.
 export async function confirm(input, opts = {}) {
   const { prescription_id, medicine_id, quantity, user_id, acknowledged = [] } = input;
   const trace = opts.trace || (() => {});
@@ -112,6 +134,7 @@ export async function confirm(input, opts = {}) {
       );
       trace("locked prescription item");
     }
+    // lock batches in FEFO order until the quantity is covered
     let left = quantity;
     const seen = [];
     while (left > 0) {
@@ -134,6 +157,7 @@ export async function confirm(input, opts = {}) {
     const med = await client.query("SELECT generic_name FROM medicines WHERE medicine_id = $1", [medicine_id]);
     const generic = med.rows[0].generic_name;
     let generics = [generic];
+    // the line is locked now, so this count cannot change under us
     if (prescription_id) {
       const rx = await prescriptionContext(client, prescription_id, medicine_id);
       const remaining = rx.item.quantity_prescribed - rx.item.quantity_dispensed;
@@ -142,6 +166,7 @@ export async function confirm(input, opts = {}) {
       }
       generics = rx.items.map((i) => i.generic_name);
     }
+    // safety check again, inside the transaction: no answer from MongoDB, no dispense
     trace("MongoDB interaction check");
     let check;
     try {
@@ -161,6 +186,7 @@ export async function confirm(input, opts = {}) {
     if (missing.length) {
       throw new DispenseError(409, "needs_acknowledgement", "Interaction warning must be acknowledged", { interactions: missing });
     }
+    // all checks passed: one stock update and one audit row per batch
     const events = [];
     for (const t of taken) {
       await client.query("UPDATE batches SET quantity = quantity - $1 WHERE batch_id = $2", [t.take, t.batch_id]);

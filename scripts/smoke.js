@@ -1,3 +1,8 @@
+// End-to-end checks against a running server (npm start first):
+//   npm run smoke
+// Each check sends real requests to the API and prints PASS or FAIL.
+// It changes data (dispenses, receipts), so run RESET_DATA.bat afterwards.
+
 const BASE = process.env.BASE || "http://localhost:4000/api";
 let failed = 0;
 

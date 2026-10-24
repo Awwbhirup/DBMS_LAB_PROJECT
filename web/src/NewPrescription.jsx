@@ -1,3 +1,6 @@
+// New prescription form. The server saves the header and every line in one
+// transaction, so a bad line (blank name, unknown medicine) saves nothing.
+
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 

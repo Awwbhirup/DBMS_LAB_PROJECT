@@ -1,3 +1,6 @@
+// Audit log screen: dispensing_events newest first with medicine and type
+// filters, and the most dispensed medicines this week (v_top_week).
+
 import React, { useEffect, useState } from "react";
 import { api, fmtTime } from "./api.js";
 

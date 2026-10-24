@@ -1,12 +1,12 @@
 # Pharmacy Inventory & Prescription Management
 
-Database Systems Lab (BCSE302P) project. PostgreSQL is the transactional core,
+Database Systems Lab (BCSE302P), Team 6. PostgreSQL is the transactional core,
 MongoDB the drug-interaction safety layer, Express the API, React the screens.
 
 ## Run it
 
 Needs PostgreSQL 17 on 5432 and MongoDB on 27017, both running locally, and
-Node 22.
+Node 22. Copy `.env.example` to `.env` and fill in the passwords, then:
 
     npm install
     npm run setup        build both databases from sql/ and mongo/
@@ -15,16 +15,15 @@ Node 22.
 
 Or double-click `RESET_DATA.bat`, then `START_DEMO.bat`.
 
-`.env` holds the connection settings (not committed):
+`npm run smoke` runs the 24 end-to-end checks against a running server.
 
-    PG_SUPERUSER, PG_SUPERPASS     used only by setup, to create roles and the database
-    PGOWNER_USER, PGOWNER_PASSWORD owns the tables
-    PGUSER, PGPASSWORD             the API's role: SELECT, INSERT, limited UPDATE
-    PGHOST, PGPORT, PGDATABASE
-    MONGO_URL, MONGO_DB
-    PORT
+## Where the data is
 
-`npm run smoke` runs the end-to-end checks against a running server.
+PostgreSQL and MongoDB keep their data in their own binary files. The server
+writes a readable copy of every table and of the interaction collection to
+`data/` after every change (`data/postgresql/*.csv`,
+`data/mongodb/drug_interactions.json`). `SHOW_DATA.bat` refreshes it and opens
+the folder.
 
 ## Layout
 
@@ -35,8 +34,9 @@ Or double-click `RESET_DATA.bat`, then `START_DEMO.bat`.
     sql/05_seed.sql         medicines, batches, 60,000 depleted history batches, prescriptions, events
     mongo/interactions.js   interaction documents of varying shape
     scripts/setup.js        creates roles, database, collection, validator, index; loads everything
-    server/                 Express API; dispense.js holds the transaction
+    scripts/export.js       writes the readable copy in data/ by hand
+    scripts/smoke.js        end-to-end checks
+    server/                 Express API; dispense.js holds the transaction, snapshot.js the data copy
     web/                    React (Vite) screens
-    docs/REVIEW 1/          Review 1 report (docx, pdf), script, how to present
-    docs/diagrams/          model, schema, data flow, transaction flow
-    docs/PRELIMINARY REVIEW/ the two earlier design reviews
+    data/                   readable copy of both databases
+    docs/                   reports, diagrams, earlier reviews

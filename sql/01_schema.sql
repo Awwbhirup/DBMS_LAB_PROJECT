@@ -1,9 +1,14 @@
+-- The six tables. Every rule that can be written as a constraint is written
+-- here, so bad data is refused by the database itself and not only by the app.
+
+-- pharmacists and the admin; every audit row names one of them
 CREATE TABLE users (
     user_id      SERIAL PRIMARY KEY,
     name         VARCHAR(80)  NOT NULL,
     role         VARCHAR(20)  NOT NULL CHECK (role IN ('pharmacist', 'admin'))
 );
 
+-- one row per product; generic_name is what MongoDB is searched by
 CREATE TABLE medicines (
     medicine_id  SERIAL PRIMARY KEY,
     name         VARCHAR(120) NOT NULL UNIQUE,
@@ -14,6 +19,7 @@ CREATE TABLE medicines (
     pack         VARCHAR(40)  NOT NULL
 );
 
+-- one row per physical lot; the source of truth for stock
 CREATE TABLE batches (
     batch_id      SERIAL PRIMARY KEY,
     medicine_id   INT          NOT NULL REFERENCES medicines(medicine_id) ON DELETE RESTRICT,
@@ -25,6 +31,7 @@ CREATE TABLE batches (
     CHECK (expiry_date > received_date)
 );
 
+-- the prescription header: who it is for and who wrote it
 CREATE TABLE prescriptions (
     prescription_id SERIAL PRIMARY KEY,
     patient_name    VARCHAR(80) NOT NULL CHECK (length(trim(patient_name)) > 0),
@@ -33,6 +40,7 @@ CREATE TABLE prescriptions (
     issued_date     DATE        NOT NULL DEFAULT current_date
 );
 
+-- the many-to-many between prescriptions and medicines, with the quantity
 CREATE TABLE prescription_items (
     item_id             SERIAL PRIMARY KEY,
     prescription_id     INT NOT NULL REFERENCES prescriptions(prescription_id) ON DELETE RESTRICT,
@@ -41,6 +49,9 @@ CREATE TABLE prescription_items (
     UNIQUE (prescription_id, medicine_id)
 );
 
+-- append-only history of every stock movement (see 03_audit_guard.sql).
+-- prescription_id is empty for receipts and walk-in sales.
+-- A DISPENSE must reduce stock and a RECEIPT must increase it.
 CREATE TABLE dispensing_events (
     event_id         BIGSERIAL   PRIMARY KEY,
     medicine_id      INT         NOT NULL REFERENCES medicines(medicine_id),

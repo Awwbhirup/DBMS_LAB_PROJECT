@@ -1,3 +1,6 @@
+// Inventory screen: stock per medicine (v_stock), the batches of the selected
+// medicine, the Receive a batch form and stock expiring within 60 days.
+
 import React, { useEffect, useState } from "react";
 import { api, fmtDate } from "./api.js";
 
@@ -19,6 +22,7 @@ export default function Inventory({ userId }) {
     if (sel) api(`/medicines/${sel.medicine_id}/batches`).then(setBatches);
   }, [sel]);
 
+  // inserts the batch and its RECEIPT audit row in one transaction
   const receive = async (e) => {
     e.preventDefault();
     try {

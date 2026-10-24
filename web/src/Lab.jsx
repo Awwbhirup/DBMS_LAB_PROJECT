@@ -1,3 +1,5 @@
+// "Under the hood" screen: four live demonstrations of the database concepts.
+
 import React, { useState } from "react";
 import { api, fmtDate } from "./api.js";
 
@@ -12,6 +14,7 @@ UPDATE batches SET quantity = quantity - $2 WHERE batch_id = $3;
 INSERT INTO dispensing_events (...) VALUES (...);
 COMMIT;`;
 
+// two pharmacists asking for the last unit of the same batch
 function Race() {
   const [out, setOut] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -81,6 +84,7 @@ function Race() {
   );
 }
 
+// cut MongoDB off (simulated) and try to dispense
 function Outage({ health }) {
   const [out, setOut] = useState(null);
   const down = health?.mongo_outage_simulated;
@@ -127,6 +131,7 @@ function Outage({ health }) {
   );
 }
 
+// EXPLAIN ANALYZE of the FEFO query with and without its index
 function Explain() {
   const [out, setOut] = useState(null);
   const run = async () => setOut(await api("/demo/explain?medicine_id=1"));
@@ -161,6 +166,7 @@ function Explain() {
   );
 }
 
+// try to UPDATE the audit log as both database roles
 function Tamper() {
   const [out, setOut] = useState(null);
   const run = async () => setOut(await api("/demo/tamper", { method: "POST" }));

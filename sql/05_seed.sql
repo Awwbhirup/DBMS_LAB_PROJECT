@@ -1,3 +1,6 @@
+-- Sample data. Every date is relative to current_date, so the data never goes
+-- stale: there is always stock expiring soon, later, and some already expired.
+
 INSERT INTO users (name, role) VALUES
     ('Abhirup Banik', 'pharmacist'),
     ('Sarvaswa Bhanti', 'pharmacist'),
@@ -50,6 +53,8 @@ INSERT INTO medicines (name, generic_name, manufacturer, form, strength, pack) V
     ('Amoxicillin 500 mg Capsule',      'Amoxicillin',           'Alkem',        'Capsule', '500 mg',    'Strip of 10'),
     ('Montelukast 10 mg Tablet',        'Montelukast',           'Cipla',        'Tablet',  '10 mg',     'Strip of 10');
 
+-- 3 to 5 live batches per medicine with staggered expiry dates.
+-- Batch numbers read B + expiry YYMM + letter, e.g. B2611A.
 INSERT INTO batches (medicine_id, batch_number, expiry_date, quantity, received_date)
 SELECT m.medicine_id,
        'B' || to_char(current_date + d.days, 'YYMM') || chr(64 + d.n),
@@ -68,11 +73,15 @@ WHERE d.n <= 3 + m.medicine_id % 3;
 
 UPDATE batches SET quantity = 36 WHERE batch_number LIKE 'B%A' AND medicine_id = 1;
 
+-- an expired batch, still holding stock, for four medicines: shown on screen,
+-- never dispensed
 INSERT INTO batches (medicine_id, batch_number, expiry_date, quantity, received_date)
 SELECT m.medicine_id, 'EXP' || to_char(current_date - 15, 'YYMM') || 'X', current_date - 15, 12, current_date - 400
 FROM medicines m
 WHERE m.medicine_id IN (1, 3, 4, 12);
 
+-- 60,000 emptied history batches (quantity 0). They make the table big enough
+-- for the FEFO index to matter, and they never enter the partial index.
 INSERT INTO batches (medicine_id, batch_number, expiry_date, quantity, received_date)
 SELECT 1 + (g % 44),
        'H' || lpad(g::text, 6, '0'),
@@ -81,6 +90,8 @@ SELECT 1 + (g % 44),
        current_date - 2700 + (g % 1900)
 FROM generate_series(1, 60000) AS g;
 
+-- ten prescriptions covering every case: #1 high (Aspirin + Warfarin),
+-- #2 no interaction, #4 contraindicated (Sildenafil + Isosorbide), others mixed
 INSERT INTO prescriptions (patient_name, patient_age, doctor_name, issued_date) VALUES
     ('Ramesh Iyer',     67, 'Dr. Meera Nair',      current_date),
     ('Priya Sharma',    34, 'Dr. Arjun Rao',       current_date),
@@ -93,6 +104,7 @@ INSERT INTO prescriptions (patient_name, patient_age, doctor_name, issued_date) 
     ('Neha Joshi',      40, 'Dr. Meera Nair',      current_date - 4),
     ('Vijay Reddy',     55, 'Dr. Arjun Rao',       current_date - 5);
 
+-- (prescription, medicine, quantity); medicine ids follow the order above
 INSERT INTO prescription_items (prescription_id, medicine_id, quantity_prescribed)
 SELECT p, m, q FROM (VALUES
     (1, 1, 10), (1, 2, 10), (1, 3, 15),
@@ -107,6 +119,7 @@ SELECT p, m, q FROM (VALUES
     (10, 35, 40), (10, 34, 20)
 ) AS t(p, m, q);
 
+-- 3,000 past walk-in dispenses spread over the last 60 days
 INSERT INTO dispensing_events (medicine_id, batch_id, prescription_id, event_type, quantity_changed, performed_by, event_timestamp)
 SELECT b.medicine_id,
        b.batch_id,
@@ -126,6 +139,8 @@ JOIN LATERAL (
     LIMIT 1
 ) b ON true;
 
+-- one RECEIPT per live batch, sized so that receipts minus dispenses equals
+-- the quantity on hand: the audit log adds up exactly to the stock
 INSERT INTO dispensing_events (medicine_id, batch_id, prescription_id, event_type, quantity_changed, performed_by, event_timestamp)
 SELECT b.medicine_id,
        b.batch_id,
@@ -137,4 +152,5 @@ SELECT b.medicine_id,
 FROM batches b
 WHERE b.quantity > 0;
 
+-- refresh planner statistics so EXPLAIN shows realistic plans straight away
 ANALYZE;

@@ -1,3 +1,5 @@
+// small fetch wrapper: JSON in and out, and the server error message thrown on failure
+
 export async function api(path, options = {}) {
   const init = { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } };
   if (init.body && typeof init.body !== "string") init.body = JSON.stringify(init.body);

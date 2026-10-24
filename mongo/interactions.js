@@ -1,3 +1,9 @@
+// Seed documents for the drug_interactions collection, one per pair of generic
+// names. Only drug_a, drug_b and severity are required (see the validator in
+// scripts/setup.js); the other fields differ from pair to pair, which is why
+// this data lives in MongoDB and not in a fixed table.
+// severity: low | moderate | high | contraindicated
+
 const interactions = [
   {
     drug_a: "Aspirin", drug_b: "Warfarin", severity: "high",
