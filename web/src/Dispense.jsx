@@ -280,7 +280,7 @@ export default function Dispense({ userId, userName }) {
                 <tbody>
                   {pv.batches.map((b) => (
                     <tr key={b.batch_id} className={b.expired ? "expired" : planIds.has(b.batch_id) ? "picked" : ""}>
-                      <td>{b.batch_id === fefoId ? "2606" : ""}</td>
+                      <td>{b.batch_id === fefoId ? "☆" : ""}</td>
                       <td>{b.batch_number}</td>
                       <td>{fmtDate(b.expiry_date)}{!b.expired && b.days_left <= 60 && <span className="soon"> {b.days_left} d</span>}</td>
                       <td>{b.quantity}</td>
